@@ -32,7 +32,7 @@
     "@typescript-eslint/eslint-plugin": "^4.4.1",
     "@typescript-eslint/parser": "^4.4.1",
     "asar": "^3.1.0",
-    "aws-sdk": "^2.814.0",
+    "aws-sdk": "^2.1213.0",
     "buffer": "^6.0.3",
     "check-for-leaks": "^1.2.1",
     "colors": "1.4.0",
