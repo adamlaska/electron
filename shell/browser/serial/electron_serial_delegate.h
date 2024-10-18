@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
+#include "base/scoped_observation.h"
 #include "content/public/browser/serial_delegate.h"
 #include "shell/browser/serial/serial_chooser_context.h"
 #include "shell/browser/serial/serial_chooser_controller.h"
@@ -19,7 +21,7 @@ namespace electron {
 class SerialChooserController;
 
 class ElectronSerialDelegate : public content::SerialDelegate,
-                               public SerialChooserContext::PortObserver {
+                               private SerialChooserContext::PortObserver {
  public:
   ElectronSerialDelegate();
   ~ElectronSerialDelegate() override;
@@ -28,31 +30,35 @@ class ElectronSerialDelegate : public content::SerialDelegate,
   ElectronSerialDelegate(const ElectronSerialDelegate&) = delete;
   ElectronSerialDelegate& operator=(const ElectronSerialDelegate&) = delete;
 
+  // content::SerialDelegate:
   std::unique_ptr<content::SerialChooser> RunChooser(
       content::RenderFrameHost* frame,
       std::vector<blink::mojom::SerialPortFilterPtr> filters,
+      std::vector<device::BluetoothUUID> allowed_bluetooth_service_class_ids,
       content::SerialChooser::Callback callback) override;
   bool CanRequestPortPermission(content::RenderFrameHost* frame) override;
   bool HasPortPermission(content::RenderFrameHost* frame,
                          const device::mojom::SerialPortInfo& port) override;
-  device::mojom::SerialPortManager* GetPortManager(
-      content::RenderFrameHost* frame) override;
-  void AddObserver(content::RenderFrameHost* frame,
-                   Observer* observer) override;
-  void RemoveObserver(content::RenderFrameHost* frame,
-                      Observer* observer) override;
   void RevokePortPermissionWebInitiated(
       content::RenderFrameHost* frame,
       const base::UnguessableToken& token) override;
   const device::mojom::SerialPortInfo* GetPortInfo(
       content::RenderFrameHost* frame,
       const base::UnguessableToken& token) override;
+  device::mojom::SerialPortManager* GetPortManager(
+      content::RenderFrameHost* frame) override;
+  void AddObserver(content::RenderFrameHost* frame,
+                   content::SerialDelegate::Observer* observer) override;
+  void RemoveObserver(content::RenderFrameHost* frame,
+                      content::SerialDelegate::Observer* observer) override;
 
   void DeleteControllerForFrame(content::RenderFrameHost* render_frame_host);
 
   // SerialChooserContext::PortObserver:
   void OnPortAdded(const device::mojom::SerialPortInfo& port) override;
   void OnPortRemoved(const device::mojom::SerialPortInfo& port) override;
+  void OnPortConnectedStateChanged(
+      const device::mojom::SerialPortInfo& port) override {}
   void OnPortManagerConnectionError() override;
   void OnPermissionRevoked(const url::Origin& origin) override {}
   void OnSerialChooserContextShutdown() override;
@@ -63,12 +69,11 @@ class ElectronSerialDelegate : public content::SerialDelegate,
   SerialChooserController* AddControllerForFrame(
       content::RenderFrameHost* render_frame_host,
       std::vector<blink::mojom::SerialPortFilterPtr> filters,
+      std::vector<device::BluetoothUUID> allowed_bluetooth_service_class_ids,
       content::SerialChooser::Callback callback);
 
   base::ScopedObservation<SerialChooserContext,
-                          SerialChooserContext::PortObserver,
-                          &SerialChooserContext::AddPortObserver,
-                          &SerialChooserContext::RemovePortObserver>
+                          SerialChooserContext::PortObserver>
       port_observation_{this};
   base::ObserverList<content::SerialDelegate::Observer> observer_list_;
 
@@ -80,5 +85,24 @@ class ElectronSerialDelegate : public content::SerialDelegate,
 };
 
 }  // namespace electron
+
+namespace base {
+
+template <>
+struct ScopedObservationTraits<electron::SerialChooserContext,
+                               electron::SerialChooserContext::PortObserver> {
+  static void AddObserver(
+      electron::SerialChooserContext* source,
+      electron::SerialChooserContext::PortObserver* observer) {
+    source->AddPortObserver(observer);
+  }
+  static void RemoveObserver(
+      electron::SerialChooserContext* source,
+      electron::SerialChooserContext::PortObserver* observer) {
+    source->RemovePortObserver(observer);
+  }
+};
+
+}  // namespace base
 
 #endif  // ELECTRON_SHELL_BROWSER_SERIAL_ELECTRON_SERIAL_DELEGATE_H_

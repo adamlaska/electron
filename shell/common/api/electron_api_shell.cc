@@ -13,18 +13,19 @@
 #include "shell/common/gin_helper/promise.h"
 #include "shell/common/node_includes.h"
 #include "shell/common/platform_util.h"
+#include "v8/include/v8-microtask-queue.h"
 
 #if BUILDFLAG(IS_WIN)
-#include "base/threading/thread_restrictions.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/shortcut.h"
+#include "shell/common/thread_restrictions.h"
 
 namespace gin {
 
 template <>
 struct Converter<base::win::ShortcutOperation> {
   static bool FromV8(v8::Isolate* isolate,
-                     v8::Handle<v8::Value> val,
+                     v8::Local<v8::Value> val,
                      base::win::ShortcutOperation* out) {
     std::string operation;
     if (!ConvertFromV8(isolate, val, &operation))
@@ -51,7 +52,7 @@ void OnOpenFinished(gin_helper::Promise<void> promise,
   if (error.empty())
     promise.Resolve();
   else
-    promise.RejectWithErrorMessage(error.c_str());
+    promise.RejectWithErrorMessage(error);
 }
 
 v8::Local<v8::Promise> OpenExternal(const GURL& url, gin::Arguments* args) {
@@ -59,12 +60,11 @@ v8::Local<v8::Promise> OpenExternal(const GURL& url, gin::Arguments* args) {
   v8::Local<v8::Promise> handle = promise.GetHandle();
 
   platform_util::OpenExternalOptions options;
-  if (args->Length() >= 2) {
-    gin::Dictionary obj(nullptr);
-    if (args->GetNext(&obj)) {
-      obj.Get("activate", &options.activate);
-      obj.Get("workingDirectory", &options.working_dir);
-    }
+  gin_helper::Dictionary obj;
+  if (args->GetNext(&obj)) {
+    obj.Get("activate", &options.activate);
+    obj.Get("workingDirectory", &options.working_dir);
+    obj.Get("logUsage", &options.log_usage);
   }
 
   platform_util::OpenExternal(
@@ -106,17 +106,13 @@ v8::Local<v8::Promise> TrashItem(v8::Isolate* isolate,
 }
 
 #if BUILDFLAG(IS_WIN)
-// The use of the ForTesting flavors is a hack workaround to avoid having to
-// patch these as friends into the associated guard classes.
-class ShortcutAccessScopedAllowBlocking
-    : public base::ScopedAllowBlockingForTesting {};
 
 bool WriteShortcutLink(const base::FilePath& shortcut_path,
                        gin_helper::Arguments* args) {
   base::win::ShortcutOperation operation =
       base::win::ShortcutOperation::kCreateAlways;
   args->GetNext(&operation);
-  gin::Dictionary options = gin::Dictionary::CreateEmpty(args->isolate());
+  auto options = gin::Dictionary::CreateEmpty(args->isolate());
   if (!args->GetNext(&options)) {
     args->ThrowError();
     return false;
@@ -142,7 +138,7 @@ bool WriteShortcutLink(const base::FilePath& shortcut_path,
   if (options.Get("toastActivatorClsid", &toastActivatorClsid))
     properties.set_toast_activator_clsid(toastActivatorClsid);
 
-  ShortcutAccessScopedAllowBlocking allow_blocking;
+  electron::ScopedAllowBlockingForElectron allow_blocking;
   base::win::ScopedCOMInitializer com_initializer;
   return base::win::CreateOrUpdateShortcutLink(shortcut_path, properties,
                                                operation);
@@ -151,8 +147,8 @@ bool WriteShortcutLink(const base::FilePath& shortcut_path,
 v8::Local<v8::Value> ReadShortcutLink(gin_helper::ErrorThrower thrower,
                                       const base::FilePath& path) {
   using base::win::ShortcutProperties;
-  gin::Dictionary options = gin::Dictionary::CreateEmpty(thrower.isolate());
-  ShortcutAccessScopedAllowBlocking allow_blocking;
+  auto options = gin::Dictionary::CreateEmpty(thrower.isolate());
+  electron::ScopedAllowBlockingForElectron allow_blocking;
   base::win::ScopedCOMInitializer com_initializer;
   base::win::ShortcutProperties properties;
   if (!base::win::ResolveShortcutProperties(
@@ -190,4 +186,4 @@ void Initialize(v8::Local<v8::Object> exports,
 
 }  // namespace
 
-NODE_LINKED_MODULE_CONTEXT_AWARE(electron_common_shell, Initialize)
+NODE_LINKED_BINDING_CONTEXT_AWARE(electron_common_shell, Initialize)

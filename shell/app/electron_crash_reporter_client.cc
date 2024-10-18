@@ -5,25 +5,20 @@
 #include "shell/app/electron_crash_reporter_client.h"
 
 #include <map>
-#include <memory>
 #include <string>
 
-#include "base/command_line.h"
 #include "base/environment.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
 #include "base/path_service.h"
-#include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
-#include "chrome/common/chrome_paths.h"
 #include "components/crash/core/common/crash_keys.h"
 #include "components/upload_list/crash_upload_list.h"
 #include "content/public/common/content_switches.h"
 #include "electron/electron_version.h"
 #include "shell/common/electron_paths.h"
+#include "shell/common/thread_restrictions.h"
 
 #if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC)
 #include "components/version_info/version_info_values.h"
@@ -60,7 +55,7 @@ void ElectronCrashReporterClient::Create() {
         base::FilePath::FromUTF8Unsafe(alternate_crash_dump_location);
   }
   if (!crash_dumps_dir_path.empty()) {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    electron::ScopedAllowBlockingForElectron allow_blocking;
     base::PathService::Override(electron::DIR_CRASH_DUMPS,
                                 crash_dumps_dir_path);
   }
@@ -156,7 +151,7 @@ bool ElectronCrashReporterClient::GetCrashDumpLocation(
     // If the DIR_CRASH_DUMPS path is overridden with
     // app.setPath('crashDumps', ...) then the directory might not have been
     // created.
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    electron::ScopedAllowBlockingForElectron allow_blocking;
     if (result && !base::PathExists(*crash_dir)) {
       return base::CreateDirectory(*crash_dir);
     }
@@ -210,7 +205,6 @@ std::string ElectronCrashReporterClient::GetUploadUrl() {
 bool ElectronCrashReporterClient::EnableBreakpadForProcess(
     const std::string& process_type) {
   return process_type == switches::kRendererProcess ||
-         process_type == switches::kPpapiPluginProcess ||
          process_type == switches::kZygoteProcess ||
          process_type == switches::kGpuProcess ||
          process_type == switches::kUtilityProcess || process_type == "node";

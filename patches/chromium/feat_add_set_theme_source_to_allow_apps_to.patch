@@ -13,10 +13,10 @@ uses internally for things like menus and devtools.
 We can remove this patch once it has in some shape been upstreamed.
 
 diff --git a/ui/native_theme/native_theme.cc b/ui/native_theme/native_theme.cc
-index 5dd898d8db8e6db8278f00d5caa5ab1a0d7f0fc0..90b80c3252a6134ba43f0496a7128cdbf21ce39b 100644
+index 09aeff0a2303ab5e3629677585c8bbb9313acc1f..c28593e409784e8de770eec4cb9b4e30e6de0dbf 100644
 --- a/ui/native_theme/native_theme.cc
 +++ b/ui/native_theme/native_theme.cc
-@@ -124,6 +124,8 @@ NativeTheme::NativeTheme(bool should_use_dark_colors,
+@@ -208,6 +208,8 @@ NativeTheme::NativeTheme(bool should_use_dark_colors,
  NativeTheme::~NativeTheme() = default;
  
  bool NativeTheme::ShouldUseDarkColors() const {
@@ -26,11 +26,11 @@ index 5dd898d8db8e6db8278f00d5caa5ab1a0d7f0fc0..90b80c3252a6134ba43f0496a7128cdb
  }
  
 diff --git a/ui/native_theme/native_theme.h b/ui/native_theme/native_theme.h
-index eefc078dffa1751b7ee812a90a1da5cc91606de0..14e68fab3ad52e60e36c57b7a66393f01ea1c8b6 100644
+index c8e200ba27bd5e9307469ea8fb4e3f8e8466877d..7add0446eaa276bbfbbb7bf4eb90f8b6684da61d 100644
 --- a/ui/native_theme/native_theme.h
 +++ b/ui/native_theme/native_theme.h
-@@ -393,6 +393,23 @@ class NATIVE_THEME_EXPORT NativeTheme {
-           custom_theme,
+@@ -445,6 +445,23 @@ class NATIVE_THEME_EXPORT NativeTheme {
+       scoped_refptr<ColorProviderKey::ThemeInitializerSupplier> custom_theme,
        bool use_custom_frame = true) const;
  
 +
@@ -53,19 +53,19 @@ index eefc078dffa1751b7ee812a90a1da5cc91606de0..14e68fab3ad52e60e36c57b7a66393f0
    // Returns a shared instance of the native theme that should be used for web
    // rendering. Do not use it in a normal application context (i.e. browser).
    // The returned object should not be deleted by the caller. This function is
-@@ -566,6 +583,7 @@ class NATIVE_THEME_EXPORT NativeTheme {
-   bool forced_colors_ = false;
+@@ -673,6 +690,7 @@ class NATIVE_THEME_EXPORT NativeTheme {
    PreferredColorScheme preferred_color_scheme_ = PreferredColorScheme::kLight;
    PreferredContrast preferred_contrast_ = PreferredContrast::kNoPreference;
+   std::optional<base::TimeDelta> caret_blink_interval_;
 +  ThemeSource theme_source_ = ThemeSource::kSystem;
  
    SEQUENCE_CHECKER(sequence_checker_);
  };
 diff --git a/ui/native_theme/native_theme_win.cc b/ui/native_theme/native_theme_win.cc
-index 6b9fb74004eba57fdff396124214356f4bcf0852..70807b315f805baab2574148520323ce78f624cb 100644
+index c1523bbdbf16e1df1bf158b7b053dce09116f2fc..06831ec767f6ba81e76f52322fc2d81a45c2c275 100644
 --- a/ui/native_theme/native_theme_win.cc
 +++ b/ui/native_theme/native_theme_win.cc
-@@ -618,6 +618,8 @@ bool NativeThemeWin::ShouldUseDarkColors() const {
+@@ -682,6 +682,8 @@ bool NativeThemeWin::ShouldUseDarkColors() const {
    // ...unless --force-dark-mode was specified in which case caveat emptor.
    if (InForcedColorsMode() && !IsForcedDarkMode())
      return false;

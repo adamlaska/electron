@@ -8,7 +8,7 @@ The `webFrameMain` module can be used to lookup frames across existing
 [`WebContents`](web-contents.md) instances. Navigation events are the common
 use case.
 
-```javascript
+```js
 const { BrowserWindow, webFrameMain } = require('electron')
 
 const win = new BrowserWindow({ width: 800, height: 1500 })
@@ -29,7 +29,7 @@ win.webContents.on(
 You can also access frames of existing pages by using the `mainFrame` property
 of [`WebContents`](web-contents.md).
 
-```javascript
+```js
 const { BrowserWindow } = require('electron')
 
 async function main () {
@@ -97,16 +97,19 @@ this limitation.
 
 Returns `boolean` - Whether the reload was initiated successfully. Only results in `false` when the frame has no history.
 
+#### `frame.isDestroyed()`
+
+Returns `boolean` - Whether the frame is destroyed.
+
 #### `frame.send(channel, ...args)`
 
 * `channel` string
 * `...args` any[]
 
 Send an asynchronous message to the renderer process via `channel`, along with
-arguments. Arguments will be serialized with the [Structured Clone
-Algorithm][SCA], just like [`postMessage`][], so prototype chains will not be
-included. Sending Functions, Promises, Symbols, WeakMaps, or WeakSets will
-throw an exception.
+arguments. Arguments will be serialized with the [Structured Clone Algorithm][SCA],
+just like [`postMessage`][], so prototype chains will not be included.
+Sending Functions, Promises, Symbols, WeakMaps, or WeakSets will throw an exception.
 
 The renderer process can handle the message by listening to `channel` with the
 [`ipcRenderer`](ipc-renderer.md) module.
@@ -128,8 +131,9 @@ For example:
 
 ```js
 // Main process
+const win = new BrowserWindow()
 const { port1, port2 } = new MessageChannelMain()
-webContents.mainFrame.postMessage('port', { message: 'hello' }, [port1])
+win.webContents.mainFrame.postMessage('port', { message: 'hello' }, [port1])
 
 // Renderer process
 ipcRenderer.on('port', (e, msg) => {
@@ -168,6 +172,16 @@ convenient when `nodeIntegrationInSubFrames` is not enabled.
 #### `frame.url` _Readonly_
 
 A `string` representing the current URL of the frame.
+
+#### `frame.origin` _Readonly_
+
+A `string` representing the current origin of the frame, serialized according
+to [RFC 6454](https://www.rfc-editor.org/rfc/rfc6454). This may be different
+from the URL. For instance, if the frame is a child window opened to
+`about:blank`, then `frame.origin` will return the parent frame's origin, while
+`frame.url` will return the empty string. Pages without a scheme/host/port
+triple origin will have the serialized origin of `"null"` (that is, the string
+containing the letters n, u, l, l).
 
 #### `frame.top` _Readonly_
 
@@ -221,5 +235,13 @@ A `string` representing the [visibility state](https://developer.mozilla.org/en-
 
 See also how the [Page Visibility API](browser-window.md#page-visibility) is affected by other Electron APIs.
 
+#### `frame.detached` _Readonly_
+
+A `Boolean` representing whether the frame is detached from the frame tree. If a frame is accessed
+while the corresponding page is running any [unload][] listeners, it may become detached as the
+newly navigated page replaced it in the frame tree.
+
 [SCA]: https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm
 [`postMessage`]: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage
+[`MessagePortMain`]: message-port-main.md
+[unload]: https://developer.mozilla.org/en-US/docs/Web/API/Window/unload_event

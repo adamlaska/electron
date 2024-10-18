@@ -4,9 +4,8 @@
 
 #include "shell/common/gin_helper/wrappable.h"
 
-#include "base/logging.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "shell/common/gin_helper/dictionary.h"
+#include "v8/include/v8-function.h"
 
 namespace gin_helper {
 
@@ -57,8 +56,6 @@ void WrappableBase::InitWith(v8::Isolate* isolate,
   v8::Local<v8::Function> init;
   if (Dictionary(isolate, wrapper).Get("_init", &init))
     init->Call(isolate->GetCurrentContext(), wrapper, 0, nullptr).IsEmpty();
-
-  AfterInit(isolate);
 }
 
 // static
