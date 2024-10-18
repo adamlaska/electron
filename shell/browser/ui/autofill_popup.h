@@ -7,18 +7,25 @@
 
 #include <vector>
 
-#include "content/public/browser/render_frame_host.h"
+#include "base/memory/raw_ptr.h"
 #include "shell/browser/ui/views/autofill_popup_view.h"
-#include "ui/color/color_id.h"
 #include "ui/gfx/font_list.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
+
+namespace content {
+class RenderFrameHost;
+}  // namespace content
+
+namespace ui {
+using ColorId = int;
+}  // namespace ui
 
 namespace electron {
 
 class AutofillPopupView;
 
-class AutofillPopup : public views::ViewObserver {
+class AutofillPopup : private views::ViewObserver {
  public:
   AutofillPopup();
   ~AutofillPopup() override;
@@ -56,9 +63,9 @@ class AutofillPopup : public views::ViewObserver {
   const gfx::FontList& GetLabelFontListForRow(int index) const;
   ui::ColorId GetBackgroundColorIDForRow(int index) const;
 
-  int GetLineCount();
-  std::u16string GetValueAt(int i);
-  std::u16string GetLabelAt(int i);
+  int line_count() const { return values_.size(); }
+  const std::u16string& value_at(int i) const { return values_.at(i); }
+  const std::u16string& label_at(int i) const { return labels_.at(i); }
   int LineFromY(int y) const;
 
   int selected_index_;
@@ -79,13 +86,13 @@ class AutofillPopup : public views::ViewObserver {
 
   // For sending the accepted suggestion to the render frame that
   // asked to open the popup
-  content::RenderFrameHost* frame_host_ = nullptr;
+  raw_ptr<content::RenderFrameHost> frame_host_ = nullptr;
 
   // The popup view. The lifetime is managed by the owning Widget
-  AutofillPopupView* view_ = nullptr;
+  raw_ptr<AutofillPopupView> view_ = nullptr;
 
   // The parent view that the popup view shows on. Weak ref.
-  views::View* parent_ = nullptr;
+  raw_ptr<views::View> parent_ = nullptr;
 };
 
 }  // namespace electron

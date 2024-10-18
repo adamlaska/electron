@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 
-from __future__ import print_function
 import ast
 import os
 import pprint
 import re
 import subprocess
 import sys
+from lib.config import get_target_arch
 
 ELECTRON_DIR = os.path.abspath(os.path.join(__file__, '..', '..'))
 NODE_DIR = os.path.join(ELECTRON_DIR, '..', 'third_party', 'electron_node')
@@ -21,22 +21,26 @@ def run_node_configure(target_cpu):
   # Work around "No acceptable ASM compiler found" error on some System,
   # it breaks nothing since Electron does not use OpenSSL.
   args += ['--openssl-no-asm']
+
+  # Enable whole-program optimization for electron native modules.
+  if sys.platform == "win32":
+    args += ['--with-ltcg']
   subprocess.check_call([sys.executable, configure] + args)
 
 def read_node_config_gypi():
   config_gypi = os.path.join(NODE_DIR, 'config.gypi')
-  with open(config_gypi, 'r') as f:
-    content = f.read()
+  with open(config_gypi, 'r', encoding='utf-8') as file_in:
+    content = file_in.read()
     return ast.literal_eval(content)
 
 def read_electron_args():
   all_gn = os.path.join(ELECTRON_DIR, 'build', 'args', 'all.gn')
   args = {}
-  with open(all_gn, 'r') as f:
-    for line in f:
+  with open(all_gn, 'r', encoding='utf-8') as file_in:
+    for line in file_in:
       if line.startswith('#'):
         continue
-      m = re.match('([\w_]+) = (.+)', line)
+      m = re.match('(\w+) = (.+)', line)
       if m == None:
         continue
       args[m.group(1)] = m.group(2)
@@ -57,9 +61,13 @@ def main(target_file, target_cpu):
   v['node_module_version'] = int(args['node_module_version'])
   # Used by certain versions of node-gyp.
   v['build_v8_with_gn'] = 'false'
+  # Enable clang conditionally based on target platform
+  # in common.gypi
+  if 'clang' in v:
+    del v['clang']
 
-  with open(target_file, 'w+') as f:
-    f.write(pprint.pformat(config, indent=2))
+  with open(target_file, 'w+', encoding='utf-8') as file_out:
+    file_out.write(pprint.pformat(config, indent=2))
 
 if __name__ == '__main__':
   sys.exit(main(sys.argv[1], sys.argv[2]))

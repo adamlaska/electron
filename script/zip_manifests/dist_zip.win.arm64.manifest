@@ -2,6 +2,7 @@ LICENSE
 LICENSES.chromium.html
 chrome_100_percent.pak
 chrome_200_percent.pak
+d3dcompiler_47.dll
 electron.exe
 ffmpeg.dll
 icudtl.dat
@@ -70,3 +71,5 @@ vk_swiftshader.dll
 vulkan-1.dll
 v8_context_snapshot.bin
 version
+win_clang_x64/icudtl.dat
+win_clang_x64/snapshot_blob.bin

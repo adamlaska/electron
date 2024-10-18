@@ -7,6 +7,7 @@
 #include <wrl/client.h>
 
 #include "base/win/atl.h"  // Must be before UIAutomationCore.h
+#include "base/win/scoped_handle.h"
 #include "content/public/browser/browser_accessibility_state.h"
 #include "shell/browser/browser.h"
 #include "shell/browser/native_window_views.h"
@@ -14,8 +15,7 @@
 #include "shell/browser/ui/views/win_frame_view.h"
 #include "shell/common/electron_constants.h"
 #include "ui/display/display.h"
-#include "ui/display/win/screen_win.h"
-#include "ui/gfx/geometry/insets.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/geometry/resize_utils.h"
 #include "ui/views/widget/native_widget_private.h"
 
@@ -165,16 +165,47 @@ gfx::ResizeEdge GetWindowResizeEdge(WPARAM param) {
   }
 }
 
+bool IsMutexPresent(const wchar_t* name) {
+  base::win::ScopedHandle mutex_holder(::CreateMutex(nullptr, false, name));
+  return ::GetLastError() == ERROR_ALREADY_EXISTS;
+}
+
+bool IsLibraryLoaded(const wchar_t* name) {
+  HMODULE hmodule = nullptr;
+  ::GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, name,
+                      &hmodule);
+  return hmodule != nullptr;
+}
+
+// The official way to get screen reader status is to call:
+// SystemParametersInfo(SPI_GETSCREENREADER) && UiaClientsAreListening()
+// However it has false positives (for example when user is using touch screens)
+// and will cause performance issues in some apps.
 bool IsScreenReaderActive() {
-  UINT screenReader = 0;
-  SystemParametersInfo(SPI_GETSCREENREADER, 0, &screenReader, 0);
-  return screenReader && UiaClientsAreListening();
+  if (IsMutexPresent(L"NarratorRunning"))
+    return true;
+
+  static const wchar_t* names[] = {// NVDA
+                                   L"nvdaHelperRemote.dll",
+                                   // JAWS
+                                   L"jhook.dll",
+                                   // Window-Eyes
+                                   L"gwhk64.dll", L"gwmhook.dll",
+                                   // ZoomText
+                                   L"AiSquared.Infuser.HookLib.dll"};
+
+  for (auto* name : names) {
+    if (IsLibraryLoaded(name))
+      return true;
+  }
+
+  return false;
 }
 
 }  // namespace
 
 std::set<NativeWindowViews*> NativeWindowViews::forwarding_windows_;
-HHOOK NativeWindowViews::mouse_hook_ = NULL;
+HHOOK NativeWindowViews::mouse_hook_ = nullptr;
 
 void NativeWindowViews::Maximize() {
   // Only use Maximize() when window is NOT transparent style
@@ -182,8 +213,8 @@ void NativeWindowViews::Maximize() {
     if (IsVisible()) {
       widget()->Maximize();
     } else {
-      widget()->native_widget_private()->Show(ui::SHOW_STATE_MAXIMIZED,
-                                              gfx::Rect());
+      widget()->native_widget_private()->Show(
+          ui::mojom::WindowShowState::kMaximized, gfx::Rect());
       NotifyWindowShow();
     }
   } else {
@@ -221,6 +252,12 @@ bool NativeWindowViews::PreHandleMSG(UINT message,
     return true;
   }
 
+  if (message == taskbar_created_message_) {
+    // We need to reset all of our buttons because the taskbar went away.
+    taskbar_host_.RestoreThumbarButtons(GetAcceleratedWidget());
+    return true;
+  }
+
   switch (message) {
     // Screen readers send WM_GETOBJECT in order to get the accessibility
     // object, so take this opportunity to push Chromium into accessible
@@ -249,6 +286,15 @@ bool NativeWindowViews::PreHandleMSG(UINT message,
         Browser::Get()->OnAccessibilitySupportChanged();
       }
 
+      return false;
+    }
+    case WM_RBUTTONUP: {
+      if (!has_frame()) {
+        bool prevent_default = false;
+        NotifyWindowSystemContextMenu(GET_X_LPARAM(l_param),
+                                      GET_Y_LPARAM(l_param), &prevent_default);
+        return prevent_default;
+      }
       return false;
     }
     case WM_GETMINMAXINFO: {
@@ -412,29 +458,31 @@ void NativeWindowViews::HandleSizeEvent(WPARAM w_param, LPARAM l_param) {
       // Note that SIZE_MAXIMIZED and SIZE_MINIMIZED might be emitted for
       // multiple times for one resize because of the SetWindowPlacement call.
       if (w_param == SIZE_MAXIMIZED &&
-          last_window_state_ != ui::SHOW_STATE_MAXIMIZED) {
-        last_window_state_ = ui::SHOW_STATE_MAXIMIZED;
+          last_window_state_ != ui::mojom::WindowShowState::kMaximized) {
+        if (last_window_state_ == ui::mojom::WindowShowState::kMinimized)
+          NotifyWindowRestore();
+        last_window_state_ = ui::mojom::WindowShowState::kMaximized;
         NotifyWindowMaximize();
         ResetWindowControls();
       } else if (w_param == SIZE_MINIMIZED &&
-                 last_window_state_ != ui::SHOW_STATE_MINIMIZED) {
-        last_window_state_ = ui::SHOW_STATE_MINIMIZED;
+                 last_window_state_ != ui::mojom::WindowShowState::kMinimized) {
+        last_window_state_ = ui::mojom::WindowShowState::kMinimized;
         NotifyWindowMinimize();
       }
       break;
     }
     case SIZE_RESTORED: {
       switch (last_window_state_) {
-        case ui::SHOW_STATE_MAXIMIZED:
-          last_window_state_ = ui::SHOW_STATE_NORMAL;
+        case ui::mojom::WindowShowState::kMaximized:
+          last_window_state_ = ui::mojom::WindowShowState::kNormal;
           NotifyWindowUnmaximize();
           break;
-        case ui::SHOW_STATE_MINIMIZED:
+        case ui::mojom::WindowShowState::kMinimized:
           if (IsFullscreen()) {
-            last_window_state_ = ui::SHOW_STATE_FULLSCREEN;
+            last_window_state_ = ui::mojom::WindowShowState::kFullscreen;
             NotifyWindowEnterFullScreen();
           } else {
-            last_window_state_ = ui::SHOW_STATE_NORMAL;
+            last_window_state_ = ui::mojom::WindowShowState::kNormal;
             NotifyWindowRestore();
           }
           break;
@@ -469,7 +517,7 @@ void NativeWindowViews::SetForwardMouseMessages(bool forward) {
                       reinterpret_cast<DWORD_PTR>(this));
 
     if (!mouse_hook_) {
-      mouse_hook_ = SetWindowsHookEx(WH_MOUSE_LL, MouseHookProc, NULL, 0);
+      mouse_hook_ = SetWindowsHookEx(WH_MOUSE_LL, MouseHookProc, nullptr, 0);
     }
   } else if (!forward && forwarding_mouse_messages_) {
     forwarding_mouse_messages_ = false;
@@ -479,7 +527,7 @@ void NativeWindowViews::SetForwardMouseMessages(bool forward) {
 
     if (forwarding_windows_.empty()) {
       UnhookWindowsHookEx(mouse_hook_);
-      mouse_hook_ = NULL;
+      mouse_hook_ = nullptr;
     }
   }
 }
@@ -517,7 +565,7 @@ LRESULT CALLBACK NativeWindowViews::MouseHookProc(int n_code,
                                                   WPARAM w_param,
                                                   LPARAM l_param) {
   if (n_code < 0) {
-    return CallNextHookEx(NULL, n_code, w_param, l_param);
+    return CallNextHookEx(nullptr, n_code, w_param, l_param);
   }
 
   // Post a WM_MOUSEMOVE message for those windows whose client area contains
@@ -541,7 +589,7 @@ LRESULT CALLBACK NativeWindowViews::MouseHookProc(int n_code,
     }
   }
 
-  return CallNextHookEx(NULL, n_code, w_param, l_param);
+  return CallNextHookEx(nullptr, n_code, w_param, l_param);
 }
 
 }  // namespace electron

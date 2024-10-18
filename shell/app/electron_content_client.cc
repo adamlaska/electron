@@ -5,23 +5,21 @@
 #include "shell/app/electron_content_client.h"
 
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
-#include "base/path_service.h"
 #include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
 #include "content/public/common/content_constants.h"
-#include "content/public/common/content_switches.h"
 #include "electron/buildflags/buildflags.h"
+#include "electron/fuses.h"
 #include "extensions/common/constants.h"
 #include "pdf/buildflags.h"
 #include "ppapi/buildflags/buildflags.h"
-#include "shell/common/electron_paths.h"
 #include "shell/common/options_switches.h"
+#include "shell/common/process_util.h"
 #include "third_party/widevine/cdm/buildflags.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -36,18 +34,13 @@
 #endif  // BUILDFLAG(ENABLE_WIDEVINE)
 
 #if BUILDFLAG(ENABLE_PDF_VIEWER)
-#include "chrome/common/pdf_util.h"
-#include "components/pdf/common/internal_plugin_helpers.h"
-#include "pdf/pdf.h"  // nogncheck
+#include "components/pdf/common/constants.h"  // nogncheck
 #include "shell/common/electron_constants.h"
 #endif  // BUILDFLAG(ENABLE_PDF_VIEWER)
 
 #if BUILDFLAG(ENABLE_PLUGINS)
-#include "content/public/browser/plugin_service.h"
-#include "content/public/common/pepper_plugin_info.h"
-#include "ppapi/shared_impl/ppapi_permissions.h"
-#include "ppapi/shared_impl/ppapi_switches.h"  // nogncheck crbug.com/1125897
-#endif                                         // BUILDFLAG(ENABLE_PLUGINS)
+#include "content/public/common/content_plugin_info.h"
+#endif  // BUILDFLAG(ENABLE_PLUGINS)
 
 namespace electron {
 
@@ -105,46 +98,12 @@ bool IsWidevineAvailable(
 }
 #endif  // BUILDFLAG(ENABLE_WIDEVINE)
 
-#if BUILDFLAG(ENABLE_PLUGINS)
-void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
-#if BUILDFLAG(ENABLE_PDF_VIEWER)
-  // TODO(upstream/thestig): Figure out how to make the PDF Viewer work without
-  // this PPAPI plugin registration.
-  content::PepperPluginInfo pdf_info;
-  pdf_info.is_internal = true;
-  pdf_info.is_out_of_process = true;
-  pdf_info.name = kPDFInternalPluginName;
-  pdf_info.description = "Portable Document Format";
-  // This isn't a real file path; it's just used as a unique identifier.
-  pdf_info.path = base::FilePath(kPdfPluginPath);
-  content::WebPluginMimeType pdf_mime_type(pdf::kInternalPluginMimeType, "pdf",
-                                           "Portable Document Format");
-  pdf_info.mime_types.push_back(pdf_mime_type);
-  plugins->push_back(pdf_info);
-
-  // NB. in Chrome, this plugin isn't registered until the PDF extension is
-  // loaded. However, in Electron, we load the PDF extension unconditionally
-  // when it is enabled in the build, so we're OK to load the plugin eagerly
-  // here.
-  content::WebPluginInfo info;
-  info.type = content::WebPluginInfo::PLUGIN_TYPE_BROWSER_PLUGIN;
-  info.name = base::ASCIIToUTF16(kPDFExtensionPluginName);
-  // This isn't a real file path; it's just used as a unique identifier.
-  info.path = base::FilePath::FromUTF8Unsafe(extension_misc::kPdfExtensionId);
-  info.background_color = content::WebPluginInfo::kDefaultBackgroundColor;
-  info.mime_types.emplace_back(kPDFMimeType, "pdf", "Portable Document Format");
-  content::PluginService::GetInstance()->RefreshPlugins();
-  content::PluginService::GetInstance()->RegisterInternalPlugin(info, true);
-#endif  // BUILDFLAG(ENABLE_PDF_VIEWER)
-}
-#endif  // BUILDFLAG(ENABLE_PLUGINS)
-
-void AppendDelimitedSwitchToVector(const base::StringPiece cmd_switch,
+void AppendDelimitedSwitchToVector(const std::string_view cmd_switch,
                                    std::vector<std::string>* append_me) {
   auto* command_line = base::CommandLine::ForCurrentProcess();
   auto switch_value = command_line->GetSwitchValueASCII(cmd_switch);
   if (!switch_value.empty()) {
-    constexpr base::StringPiece delimiter(",", 1);
+    constexpr std::string_view delimiter{",", 1};
     auto tokens =
         base::SplitString(switch_value, delimiter, base::TRIM_WHITESPACE,
                           base::SPLIT_WANT_NONEMPTY);
@@ -164,7 +123,7 @@ std::u16string ElectronContentClient::GetLocalizedString(int message_id) {
   return l10n_util::GetStringUTF16(message_id);
 }
 
-base::StringPiece ElectronContentClient::GetDataResource(
+std::string_view ElectronContentClient::GetDataResource(
     int resource_id,
     ui::ResourceScaleFactor scale_factor) {
   return ui::ResourceBundle::GetSharedInstance().GetRawDataResourceForScale(
@@ -183,16 +142,13 @@ base::RefCountedMemory* ElectronContentClient::GetDataResourceBytes(
 }
 
 void ElectronContentClient::AddAdditionalSchemes(Schemes* schemes) {
-  auto* command_line = base::CommandLine::ForCurrentProcess();
-  std::string process_type =
-      command_line->GetSwitchValueASCII(::switches::kProcessType);
   // Browser Process registration happens in
   // `api::Protocol::RegisterSchemesAsPrivileged`
   //
   // Renderer Process registration happens in `RendererClientBase`
   //
   // We use this for registration to network utility process
-  if (process_type == ::switches::kUtilityProcess) {
+  if (IsUtilityProcess()) {
     AppendDelimitedSwitchToVector(switches::kServiceWorkerSchemes,
                                   &schemes->service_worker_schemes);
     AppendDelimitedSwitchToVector(switches::kStandardSchemes,
@@ -205,7 +161,9 @@ void ElectronContentClient::AddAdditionalSchemes(Schemes* schemes) {
                                   &schemes->cors_enabled_schemes);
   }
 
-  schemes->service_worker_schemes.emplace_back(url::kFileScheme);
+  if (electron::fuses::IsGrantFileProtocolExtraPrivilegesEnabled()) {
+    schemes->service_worker_schemes.emplace_back(url::kFileScheme);
+  }
 
 #if BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
   schemes->standard_schemes.push_back(extensions::kExtensionScheme);
@@ -217,11 +175,24 @@ void ElectronContentClient::AddAdditionalSchemes(Schemes* schemes) {
 #endif
 }
 
-void ElectronContentClient::AddPepperPlugins(
-    std::vector<content::PepperPluginInfo>* plugins) {
-#if BUILDFLAG(ENABLE_PLUGINS)
-  ComputeBuiltInPlugins(plugins);
-#endif  // BUILDFLAG(ENABLE_PLUGINS)
+void ElectronContentClient::AddPlugins(
+    std::vector<content::ContentPluginInfo>* plugins) {
+#if BUILDFLAG(ENABLE_PDF_VIEWER)
+  static constexpr char kPDFPluginExtension[] = "pdf";
+  static constexpr char kPDFPluginDescription[] = "Portable Document Format";
+
+  content::ContentPluginInfo pdf_info;
+  pdf_info.is_internal = true;
+  pdf_info.is_out_of_process = true;
+  pdf_info.name = kPDFInternalPluginName;
+  pdf_info.description = kPDFPluginDescription;
+  // This isn't a real file path; it's just used as a unique identifier.
+  pdf_info.path = base::FilePath(kPdfPluginPath);
+  content::WebPluginMimeType pdf_mime_type(
+      pdf::kInternalPluginMimeType, kPDFPluginExtension, kPDFPluginDescription);
+  pdf_info.mime_types.push_back(pdf_mime_type);
+  plugins->push_back(pdf_info);
+#endif  // BUILDFLAG(ENABLE_PDF_VIEWER)
 }
 
 void ElectronContentClient::AddContentDecryptionModules(

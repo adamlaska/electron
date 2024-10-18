@@ -1,6 +1,6 @@
-import { ipcRendererInternal } from '@electron/internal/renderer/ipc-renderer-internal';
-import { internalContextBridge } from '@electron/internal/renderer/api/context-bridge';
 import { IPC_MESSAGES } from '@electron/internal/common/ipc-messages';
+import { internalContextBridge } from '@electron/internal/renderer/api/context-bridge';
+import { ipcRendererInternal } from '@electron/internal/renderer/ipc-renderer-internal';
 
 const { contextIsolationEnabled } = internalContextBridge;
 
@@ -30,7 +30,7 @@ export const windowSetup = (isWebView: boolean, isHiddenPage: boolean) => {
     let cachedVisibilityState = isHiddenPage ? 'hidden' : 'visible';
 
     // Subscribe to visibilityState changes.
-    ipcRendererInternal.on(IPC_MESSAGES.GUEST_INSTANCE_VISIBILITY_CHANGE, function (_event, visibilityState: VisibilityState) {
+    ipcRendererInternal.on(IPC_MESSAGES.GUEST_INSTANCE_VISIBILITY_CHANGE, function (_event, visibilityState: DocumentVisibilityState) {
       if (cachedVisibilityState !== visibilityState) {
         cachedVisibilityState = visibilityState;
         document.dispatchEvent(new Event('visibilitychange'));
